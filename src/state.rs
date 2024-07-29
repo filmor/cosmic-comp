@@ -15,6 +15,7 @@ use crate::{
         atspi::AtspiState,
         drm::WlDrmState,
         image_source::ImageSourceState,
+        keymap::KeymapState,
         output_configuration::OutputConfigurationState,
         output_power::OutputPowerState,
         screencopy::ScreencopyState,
@@ -522,6 +523,7 @@ impl State {
         VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
         AlphaModifierState::new::<Self>(&dh);
         SinglePixelBufferState::new::<Self>(&dh);
+        KeymapState::new::<State, _>(&dh, client_is_privileged);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
