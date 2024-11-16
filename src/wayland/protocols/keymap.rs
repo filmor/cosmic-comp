@@ -8,12 +8,22 @@ use smithay::{
         keyboard::{KeyboardHandle, Layout},
         SeatHandler,
     },
-    reexports::wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New},
+    reexports::{
+        wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New},
+    }
 };
-use wayland_backend::server::GlobalId;
+use wayland_backend::server::{ClientId, GlobalId};
 
+pub trait KeymapHandler {
+    fn keymap_state(&mut self) -> &mut KeymapState;
+}
+
+// TODO: add a refrensh function that sends `group`
+// track list of keymaps per keyboard
+#[derive(Debug)]
 pub struct KeymapState {
     pub global: GlobalId,
+    keymaps: Vec<ZcosmicKeymapV1>,
 }
 
 impl KeymapState {
@@ -28,7 +38,7 @@ impl KeymapState {
                 filter: Box::new(client_filter),
             },
         );
-        KeymapState { global }
+        KeymapState { global, keymaps: Vec::new() }
     }
 }
 
@@ -64,9 +74,10 @@ where
     D: Dispatch<ZcosmicKeymapV1, KeymapUserData<D>>,
     D: 'static,
     D: SeatHandler,
+    D: KeymapHandler,
 {
     fn request(
-        _state: &mut D,
+        state: &mut D,
         _client: &Client,
         _resource: &ZcosmicKeymapManagerV1,
         request: zcosmic_keymap_manager_v1::Request,
@@ -77,9 +88,10 @@ where
         match request {
             zcosmic_keymap_manager_v1::Request::GetKeymap { keymap, keyboard } => {
                 let handle = KeyboardHandle::<D>::from_resource(&keyboard);
-                data_init.init(keymap, KeymapUserData {
+                let keymap = data_init.init(keymap, KeymapUserData {
                     handle
                 });
+                state.keymap_state().keymaps.push(keymap);
             }
             zcosmic_keymap_manager_v1::Request::Destroy => {}
             _ => unreachable!(),
@@ -97,6 +109,7 @@ where
     D: Dispatch<ZcosmicKeymapV1, KeymapUserData<D>>,
     D: 'static,
     D: SeatHandler,
+    D: KeymapHandler,
 {
     fn request(
         state: &mut D,
@@ -117,6 +130,13 @@ where
             }
             zcosmic_keymap_v1::Request::Destroy => {}
             _ => unreachable!(),
+        }
+    }
+
+    fn destroyed(state: &mut D, _client: ClientId, keymap: &ZcosmicKeymapV1, _data: &KeymapUserData<D>) {
+        let keymaps = &mut state.keymap_state().keymaps;
+        if let Some(idx) = keymaps.iter().position(|x| x == keymap) {
+            keymaps.remove(idx);
         }
     }
 }
