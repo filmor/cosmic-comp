@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic_protocols::keymap::v1::server::zcosmic_keymap_manager_v1::{
+use cosmic_protocols::keymap::v1::server::{zcosmic_keymap_v1::{self, ZcosmicKeymapV1}, zcosmic_keymap_manager_v1::{
     self, ZcosmicKeymapManagerV1,
-};
+}};
 use smithay::{
     input::{
         keyboard::{KeyboardHandle, Layout},
@@ -60,28 +60,62 @@ where
 
 impl<D> Dispatch<ZcosmicKeymapManagerV1, (), D> for KeymapState
 where
-    D: Dispatch<ZcosmicKeymapManagerV1, ()> + 'static,
+    D: Dispatch<ZcosmicKeymapManagerV1, ()>,
+    D: Dispatch<ZcosmicKeymapV1, KeymapUserData<D>>,
+    D: 'static,
     D: SeatHandler,
 {
     fn request(
-        state: &mut D,
+        _state: &mut D,
         _client: &Client,
         _resource: &ZcosmicKeymapManagerV1,
         request: zcosmic_keymap_manager_v1::Request,
         _data: &(),
         _dhandle: &DisplayHandle,
+        data_init: &mut DataInit<'_, D>,
+    ) {
+        match request {
+            zcosmic_keymap_manager_v1::Request::GetKeymap { keymap, keyboard } => {
+                let handle = KeyboardHandle::<D>::from_resource(&keyboard);
+                data_init.init(keymap, KeymapUserData {
+                    handle
+                });
+            }
+            zcosmic_keymap_manager_v1::Request::Destroy => {}
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[doc(hidden)]
+pub struct KeymapUserData<D: SeatHandler> {
+    handle: Option<KeyboardHandle<D>>,
+}
+
+impl<D> Dispatch<ZcosmicKeymapV1, KeymapUserData<D>, D> for KeymapState
+where
+    D: Dispatch<ZcosmicKeymapV1, KeymapUserData<D>>,
+    D: 'static,
+    D: SeatHandler,
+{
+    fn request(
+        state: &mut D,
+        _client: &Client,
+        _resource: &ZcosmicKeymapV1,
+        request: zcosmic_keymap_v1::Request,
+        data: &KeymapUserData<D>,
+        _dhandle: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_keymap_manager_v1::Request::SetGroup { keyboard, group } => {
-                if let Some(handle) = KeyboardHandle::<D>::from_resource(&keyboard) {
+            zcosmic_keymap_v1::Request::SetGroup { group } => {
+                if let Some(handle) = data.handle.as_ref() {
                     handle.with_xkb_state(state, |mut context| {
                         context.set_layout(Layout(group));
-                        // TODO is `modifiers` sent?
                     });
                 }
             }
-            zcosmic_keymap_manager_v1::Request::Destroy => {}
+            zcosmic_keymap_v1::Request::Destroy => {}
             _ => unreachable!(),
         }
     }
@@ -94,6 +128,9 @@ macro_rules! delegate_keymap {
         ] => $crate::wayland::protocols::keymap::KeymapState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             cosmic_protocols::keymap::v1::server::zcosmic_keymap_manager_v1::ZcosmicKeymapManagerV1: ()
+        ] => $crate::wayland::protocols::keymap::KeymapState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::keymap::v1::server::zcosmic_keymap_v1::ZcosmicKeymapV1: $crate::wayland::protocols::keymap::KeymapUserData<$ty>
         ] => $crate::wayland::protocols::keymap::KeymapState);
     };
 }
