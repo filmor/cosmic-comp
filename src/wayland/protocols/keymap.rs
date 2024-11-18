@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic_protocols::keymap::v1::server::{zcosmic_keymap_v1::{self, ZcosmicKeymapV1}, zcosmic_keymap_manager_v1::{
-    self, ZcosmicKeymapManagerV1,
-}};
+use cosmic_protocols::keymap::v1::server::{
+    zcosmic_keymap_manager_v1::{self, ZcosmicKeymapManagerV1},
+    zcosmic_keymap_v1::{self, ZcosmicKeymapV1},
+};
 use smithay::{
     input::{
         keyboard::{KeyboardHandle, Layout},
         SeatHandler,
     },
-    reexports::{
-        wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New},
-    }
+    reexports::wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New},
 };
 use wayland_backend::server::{ClientId, GlobalId};
 
@@ -25,6 +24,7 @@ pub struct KeymapState {
     pub global: GlobalId,
     keymaps: Vec<ZcosmicKeymapV1>,
     group: Option<u32>,
+    // TODO: per keyboard?
 }
 
 impl KeymapState {
@@ -39,7 +39,11 @@ impl KeymapState {
                 filter: Box::new(client_filter),
             },
         );
-        KeymapState { global, keymaps: Vec::new(), group: None }
+        KeymapState {
+            global,
+            keymaps: Vec::new(),
+            group: None,
+        }
     }
 
     pub fn refresh(&mut self, group: u32) {
@@ -98,11 +102,14 @@ where
         match request {
             zcosmic_keymap_manager_v1::Request::GetKeymap { keymap, keyboard } => {
                 let handle = KeyboardHandle::<D>::from_resource(&keyboard);
-                let keymap = data_init.init(keymap, KeymapUserData {
-                    handle
+                let active_layout = handle.as_ref().map(|handle| {
+                    handle.with_xkb_state(state, |context| {
+                        context.xkb().lock().unwrap().active_layout()
+                    })
                 });
-                if let Some(group) = state.keymap_state().group {
-                    keymap.group(group);
+                let keymap = data_init.init(keymap, KeymapUserData { handle });
+                if let Some(layout) = active_layout {
+                    keymap.group(layout.0);
                 }
                 state.keymap_state().keymaps.push(keymap);
             }
@@ -146,7 +153,12 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, keymap: &ZcosmicKeymapV1, _data: &KeymapUserData<D>) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        keymap: &ZcosmicKeymapV1,
+        _data: &KeymapUserData<D>,
+    ) {
         let keymaps = &mut state.keymap_state().keymaps;
         if let Some(idx) = keymaps.iter().position(|x| x == keymap) {
             keymaps.remove(idx);
