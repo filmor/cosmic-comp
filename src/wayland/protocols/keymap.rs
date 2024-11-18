@@ -9,7 +9,7 @@ use smithay::{
         keyboard::{KeyboardHandle, Layout},
         SeatHandler,
     },
-    reexports::wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New},
+    reexports::wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, Resource, New},
 };
 use wayland_backend::server::{ClientId, GlobalId};
 
@@ -17,14 +17,10 @@ pub trait KeymapHandler {
     fn keymap_state(&mut self) -> &mut KeymapState;
 }
 
-// TODO: add a refrensh function that sends `group`
-// track list of keymaps per keyboard
 #[derive(Debug)]
 pub struct KeymapState {
     pub global: GlobalId,
-    keymaps: Vec<ZcosmicKeymapV1>,
-    group: Option<u32>,
-    // TODO: per keyboard?
+    keymaps: Vec<(ZcosmicKeymapV1, Option<Layout>)>,
 }
 
 impl KeymapState {
@@ -42,16 +38,23 @@ impl KeymapState {
         KeymapState {
             global,
             keymaps: Vec::new(),
-            group: None,
         }
     }
 
-    pub fn refresh(&mut self, group: u32) {
-        if self.group != Some(group) {
-            for keymap in &self.keymaps {
-                keymap.group(group);
+    // requires D
+    pub fn refresh<D: SeatHandler + 'static>(&mut self, state: &mut D) {
+        for (keymap, last_layout) in &mut self.keymaps {
+            if let Some(data) = keymap.data::<KeymapUserData<D>>() {
+                if let Some(handle) = &data.handle {
+                    let active_layout = handle.with_xkb_state(state, |context| {
+                        context.xkb().lock().unwrap().active_layout()
+                    });
+                    if *last_layout != Some(active_layout) {
+                        keymap.group(active_layout.0);
+                        *last_layout = Some(active_layout);
+                    }
+                }
             }
-            self.group = Some(group);
         }
     }
 }
@@ -111,7 +114,7 @@ where
                 if let Some(layout) = active_layout {
                     keymap.group(layout.0);
                 }
-                state.keymap_state().keymaps.push(keymap);
+                state.keymap_state().keymaps.push((keymap, active_layout));
             }
             zcosmic_keymap_manager_v1::Request::Destroy => {}
             _ => unreachable!(),
@@ -160,7 +163,7 @@ where
         _data: &KeymapUserData<D>,
     ) {
         let keymaps = &mut state.keymap_state().keymaps;
-        if let Some(idx) = keymaps.iter().position(|x| x == keymap) {
+        if let Some(idx) = keymaps.iter().position(|(x, _)| x == keymap) {
             keymaps.remove(idx);
         }
     }
