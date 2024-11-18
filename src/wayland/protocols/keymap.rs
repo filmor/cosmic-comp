@@ -9,8 +9,11 @@ use smithay::{
         keyboard::{KeyboardHandle, Layout},
         SeatHandler,
     },
-    reexports::wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, Resource, New},
+    reexports::wayland_server::{
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+    },
 };
+use std::mem;
 use wayland_backend::server::{ClientId, GlobalId};
 
 pub trait KeymapHandler {
@@ -41,9 +44,12 @@ impl KeymapState {
         }
     }
 
-    // requires D
-    pub fn refresh<D: SeatHandler + 'static>(&mut self, state: &mut D) {
-        for (keymap, last_layout) in &mut self.keymaps {
+    pub fn refresh<D>(state: &mut D)
+    where
+        D: SeatHandler + KeymapHandler + 'static,
+    {
+        let mut keymaps = mem::take(&mut state.keymap_state().keymaps);
+        for (keymap, last_layout) in &mut keymaps {
             if let Some(data) = keymap.data::<KeymapUserData<D>>() {
                 if let Some(handle) = &data.handle {
                     let active_layout = handle.with_xkb_state(state, |context| {
@@ -56,6 +62,7 @@ impl KeymapState {
                 }
             }
         }
+        state.keymap_state().keymaps = keymaps;
     }
 }
 
