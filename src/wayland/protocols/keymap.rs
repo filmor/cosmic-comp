@@ -24,6 +24,7 @@ pub trait KeymapHandler {
 pub struct KeymapState {
     pub global: GlobalId,
     keymaps: Vec<ZcosmicKeymapV1>,
+    group: Option<u32>,
 }
 
 impl KeymapState {
@@ -38,7 +39,16 @@ impl KeymapState {
                 filter: Box::new(client_filter),
             },
         );
-        KeymapState { global, keymaps: Vec::new() }
+        KeymapState { global, keymaps: Vec::new(), group: None }
+    }
+
+    pub fn refresh(&mut self, group: u32) {
+        if self.group != Some(group) {
+            for keymap in &self.keymaps {
+                keymap.group(group);
+            }
+            self.group = Some(group);
+        }
     }
 }
 
@@ -91,6 +101,9 @@ where
                 let keymap = data_init.init(keymap, KeymapUserData {
                     handle
                 });
+                if let Some(group) = state.keymap_state().group {
+                    keymap.group(group);
+                }
                 state.keymap_state().keymaps.push(keymap);
             }
             zcosmic_keymap_manager_v1::Request::Destroy => {}
